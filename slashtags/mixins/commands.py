@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import re
 import types
 from copy import copy
@@ -29,6 +30,8 @@ TAG_RE = re.compile(r"(?i)(\[p\])?\b(slash\s?)?tag'?s?\b")
 CHOICE_RE = re.compile(r".{1,100}:.{1,100}")
 
 CHOICE_LIMIT = 25
+
+log = logging.getLogger("red.phenom4n4n.slashtags.commands")
 
 
 def _sub(match: re.Match) -> str:
@@ -114,13 +117,20 @@ class Commands(MixinMeta):
         )
         try:
             await command.register()
-        except discord.Forbidden:
+        except discord.Forbidden as error:
+            log.error(
+                f"Failed to create command {command!r} on guild {ctx.guild!r}", exc_info=error
+            )
             text = (
                 "Looks like I don't have permission to add Slash Commands here. Reinvite me "
                 "with this invite link and try again: <https://discordapp.com/oauth2/authorize"
                 f"?client_id={self.bot.user.id}&scope=bot%20applications.commands>"
             )
             return await ctx.send(text)
+        except Exception as error:
+            log.error(f"Failed to create command {command!r} on guild {ctx.guild!r}")
+            # exc info unneeded since error handler should print it, however info on the command options is needed
+            raise
 
         tag = SlashTag(
             self,
@@ -295,7 +305,7 @@ class Commands(MixinMeta):
         self, ctx: commands.Context, tag: GuildTagConverter, name: TagName(check_global=False)
     ):
         """Edit a slash tag's name."""
-        await ctx.send(tag.edit_name(name))
+        await ctx.send(await tag.edit_name(name))
 
     @slashtag_edit.command("description")
     async def slashtag_edit_description(
@@ -353,7 +363,9 @@ class Commands(MixinMeta):
         *,
         is_global: bool,
     ):
-        description = [self.format_tagscript(tag) for tag in tags.values()]
+        description = [
+            self.format_tagscript(tag) for tag in sorted(tags.values(), key=lambda t: t.name)
+        ]
         description = "\n".join(description)
 
         e = discord.Embed(color=await ctx.embed_color())
@@ -441,7 +453,7 @@ class Commands(MixinMeta):
     async def slashtag_global_edit_name(
         self, ctx: commands.Context, tag: GlobalTagConverter, name: TagName(global_priority=True)
     ):
-        await ctx.send(tag.edit_name(name))
+        await ctx.send(await tag.edit_name(name))
 
     @slashtag_global_edit.command("description")
     @copy_doc(slashtag_edit_description)
