@@ -32,6 +32,7 @@ from redbot.core import commands
 from redbot.core.utils.chat_formatting import humanize_number as hn
 from redbot.core.utils.chat_formatting import pagify, text_to_file
 from redbot.core.utils.mod import get_audit_reason
+from TagScriptEngine import Interpreter, LooseVariableGetterBlock, MemberAdapter
 
 from .abc import MixinMeta
 from .converters import FuzzyRole, StrictRole, TargeterArgs, TouchableMember
@@ -63,6 +64,10 @@ class Roles(MixinMeta):
     """
     Useful role commands.
     """
+
+    def __init__(self):
+        self.interpreter = Interpreter([LooseVariableGetterBlock()])
+        super().__init__()
 
     async def initialize(self):
         log.debug("Roles Initialize")
@@ -124,20 +129,38 @@ class Roles(MixinMeta):
         e.set_footer(text=role.id)
         return e
 
+    def format_member(self, member: discord.Member, formatting: str) -> str:
+        output = self.interpreter.process(formatting, {"member": MemberAdapter(member)})
+        return output.body
+
     @commands.bot_has_permissions(attach_files=True)
     @commands.admin_or_permissions(manage_roles=True)
     @role.command("members", aliases=["dump"])
-    async def role_members(self, ctx: commands.Context, *, role: FuzzyRole):
-        """Sends a list of members in a role."""
+    async def role_members(
+        self,
+        ctx: commands.Context,
+        role: FuzzyRole,
+        *,
+        formatting: str = "{member} - {member(id)}",
+    ):
+        """
+        Sends a list of members in a role.
+
+        You can supply a custom formatting tagscript for each member.
+        The [member](https://phen-cogs.readthedocs.io/en/latest/tags/default_variables.html#author-block) block is available to use, found on the [TagScript documentation](https://phen-cogs.readthedocs.io/en/latest/index.html).
+
+        **Example:**
+        `[p]role dump @admin <t:{member(timestamp)}> - {member(mention)}`
+        """
         if guild_roughly_chunked(ctx.guild) is False and self.bot.intents.members:
             await ctx.guild.chunk()
         if not role.members:
             return await ctx.send(f"**{role}** has no members.")
-        members = "\n".join(f"{member} - {member.id}" for member in role.members)
+        members = "\n".join(self.format_member(member, formatting) for member in role.members)
         if len(members) > 2000:
             await ctx.send(file=text_to_file(members, f"members.txt"))
         else:
-            await ctx.send(members)
+            await ctx.send(members, allowed_mentions=discord.AllowedMentions.none())
 
     @staticmethod
     def get_hsv(role: discord.Role):
@@ -564,27 +587,26 @@ class Roles(MixinMeta):
         s = "" if length == 1 else "s"
         return f"**{hn(length)}** member{s}"
 
-    @role.command("uniquemembers", aliases=["um"])
-    async def role_uniquemembers(
-        self, ctx: commands.Context, role_one: FuzzyRole, role_two: FuzzyRole
-    ):
+    @role.command("uniquemembers", aliases=["um"], require_var_positional=True)
+    async def role_uniquemembers(self, ctx: commands.Context, *roles: FuzzyRole):
         """
-        View the total unique members between two roles.
+        View the total unique members between multiple roles.
         """
+        roles_length = len(roles)
+        if roles_length == 1:
+            raise commands.UserFeedbackCheckFailure("You must provide at least 2 roles.")
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
-        color = role_one.color
-        role_one_members = role_one.members
-        role_two_members = role_two.members
-        unique_members = set(role_one_members + role_two_members)
-        description = [
-            f"*Unique members*: {self.format_members(unique_members)}",
-            f"{role_one.mention}: {self.format_members(role_one_members)}",
-            f"{role_two.mention}: {self.format_members(role_two_members)}",
-        ]
+        color = roles[0].color
+        unique_members = set()
+        description = []
+        for role in roles:
+            unique_members.update(role.members)
+            description.append(f"{role.mention}: {self.format_members(role.members)}")
+        description.insert(0, f"**Unique members**: {self.format_members(unique_members)}")
         e = discord.Embed(
             color=color,
-            title=f"Unique members between {role_one} and {role_two}",
+            title=f"Unique members between {roles_length} roles",
             description="\n".join(description),
         )
         ref = ctx.message.to_reference(fail_if_not_exists=False)

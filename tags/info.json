@@ -9,9 +9,8 @@
     ],
     "required_cogs": {},
     "requirements": [
-        "PyParsing",
-        "git+https://github.com/phenom4n4n/TagScript.git@4c75754fe31d40e71272a70b33e5dff94fd26167",
-        "beautifulsoup4"
+        "TagScript==2.6.2",
+        "tabulate"
     ],
     "tags": [
         "tags"

@@ -39,6 +39,7 @@ Welcome to Phen-Cogs's documentation!
    tags/default_variables
    tags/parsing_blocks
    tags/example_tags
+   tags/owner_guide
 
 .. toctree::
    :maxdepth: 2
@@ -46,6 +47,7 @@ Welcome to Phen-Cogs's documentation!
 
    slashtags/slashtags
    slashtags/slash_arguments
+   slashtags/context_menus
    slashtags/example_slashtags
 
 .. toctree::

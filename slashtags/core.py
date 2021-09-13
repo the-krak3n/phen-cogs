@@ -28,6 +28,7 @@ from collections import defaultdict
 from functools import partial
 from typing import Coroutine, Dict, Optional
 
+import aiohttp
 import discord
 import TagScriptEngine as tse
 from redbot.core import commands
@@ -37,9 +38,10 @@ from redbot.core.utils import AsyncIter
 from redbot.core.utils.chat_formatting import humanize_list
 
 from .abc import CompositeMetaClass
+from .errors import MissingTagPermissions
 from .http import InteractionButton, InteractionCommand, SlashHTTP
 from .mixins import Commands, Processor
-from .objects import SlashCommand, SlashContext, SlashTag
+from .objects import ApplicationCommand, SlashContext, SlashTag
 
 log = logging.getLogger("red.phenom4n4n.slashtags")
 
@@ -51,8 +53,8 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
     The TagScript documentation can be found [here](https://phen-cogs.readthedocs.io/en/latest/index.html).
     """
 
-    __version__ = "0.4.3"
-    __author__ = ["PhenoM4n4n"]
+    __version__ = "0.5.0"
+    __author__ = ("PhenoM4n4n",)
 
     def format_help_for_context(self, ctx: commands.Context):
         pre_processed = super().format_help_for_context(ctx)
@@ -85,11 +87,12 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
         self.config.register_guild(**default_guild)
         self.config.register_global(**default_global)
 
-        self.command_cache: Dict[int, SlashCommand] = {}
+        self.command_cache: Dict[int, ApplicationCommand] = {}
         self.guild_tag_cache: Dict[int, Dict[int, SlashTag]] = defaultdict(dict)
         self.global_tag_cache: Dict[int, SlashTag] = {}
 
         self.load_task = self.create_task(self.initialize_task())
+        self.session = aiohttp.ClientSession()
         bot.add_dev_env_value("st", lambda ctx: self)
 
         super().__init__()
@@ -119,6 +122,7 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
         if self.testing_enabled:
             self.remove_test_cog()
         self.load_task.cancel()
+        asyncio.create_task(self.session.close())
 
     async def cog_before_invoke(self, ctx: commands.Context) -> bool:
         if not self.bot.get_cog("SlashInjector"):
@@ -174,7 +178,11 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
         is_owner = await self.bot.is_owner(ctx.author)
         if is_owner:
             return True
-        # TODO block validation
+        author_perms = ctx.channel.permissions_for(ctx.author)
+        if output.actions.get("overrides") and not author_perms.manage_guild:
+            raise MissingTagPermissions(
+                "You must have **Manage Server** permissions to use the `override` block."
+            )
         return True
 
     def get_tag(
@@ -212,7 +220,7 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
             tag = get(self.global_tag_cache.values())
         return tag
 
-    def get_command(self, command_id: int) -> SlashCommand:
+    def get_command(self, command_id: int) -> ApplicationCommand:
         return self.command_cache.get(command_id)
 
     @commands.Cog.listener()
@@ -246,7 +254,7 @@ class SlashTags(Commands, Processor, commands.Cog, metaclass=CompositeMetaClass)
     async def invoke_and_catch(self, interaction: InteractionCommand):
         try:
             command = interaction.command
-            if isinstance(command, SlashCommand):
+            if isinstance(command, ApplicationCommand):
                 tag = self.get_tag(interaction.guild, command.id)
                 await self.process_tag(interaction, tag)
             elif interaction.command_id == self.eval_command:

@@ -49,7 +49,7 @@ class DisboardReminder(commands.Cog):
     Set a reminder to bump on Disboard.
     """
 
-    __version__ = "1.3.4"
+    __version__ = "1.3.5"
 
     def format_help_for_context(self, ctx):
         pre_processed = super().format_help_for_context(ctx)
@@ -387,7 +387,10 @@ class DisboardReminder(commands.Cog):
             return
 
         if data["lock"] and my_perms.manage_roles:
-            await self.autolock_channel(guild, channel, my_perms, lock=False)
+            try:
+                await self.autolock_channel(guild, channel, my_perms, lock=False)
+            except discord.Forbidden:
+                await self.config.guild(guild).lock.clear()
 
         message = data["message"]
         allowed_mentions = self.bot.allowed_mentions
@@ -425,7 +428,7 @@ class DisboardReminder(commands.Cog):
         if not message.embeds:
             return
         embed = message.embeds[0]
-        if "Bump done" in embed.description:
+        if ":thumbsup:" in embed.description:
             return embed
 
     async def respond_to_bump(
@@ -468,7 +471,10 @@ class DisboardReminder(commands.Cog):
             await self.config.guild(guild).channel.clear()
 
         if data["lock"] and my_perms.manage_roles:
-            await self.autolock_channel(guild, bump_channel, my_perms, lock=True)
+            try:
+                await self.autolock_channel(guild, bump_channel, my_perms, lock=True)
+            except discord.Forbidden:
+                await self.config.guild(guild).lock.clear()
 
     @commands.Cog.listener()
     async def on_message_without_command(self, message: discord.Message):

@@ -28,7 +28,7 @@ import discord
 import TagScriptEngine as tse
 from redbot.core import Config, commands
 from redbot.core.bot import Red
-from redbot.core.utils.chat_formatting import humanize_list, humanize_number, inline, pagify
+from redbot.core.utils.chat_formatting import box, humanize_list, humanize_number, inline, pagify
 
 from .errors import TagAliasError
 
@@ -113,12 +113,24 @@ class Tag:
     def aliases(self) -> List[str]:
         return self._aliases.copy()
 
-    def run(
-        self, interpreter: tse.Interpreter, seed_variables: dict = {}, **kwargs
-    ) -> tse.Response:
+    @property
+    def cooldown_key(self) -> str:
+        return f"{self.guild_id}:{self.name}"
+
+    async def run(self, seed_variables: dict, **kwargs) -> tse.Response:
         self.uses += 1
-        seed_variables.update(uses=tse.IntAdapter(self.uses))
-        return interpreter.process(self.tagscript, seed_variables, **kwargs)
+        seed_variables["uses"] = tse.IntAdapter(self.uses)
+        cog = self.cog
+        output = cog.engine.process(
+            self.tagscript,
+            seed_variables,
+            dot_parameter=cog.dot_parameter,
+            cooldown_key=self.cooldown_key,
+            **kwargs,
+        )
+        if cog.async_enabled:
+            return await output
+        return output
 
     async def update_config(self):
         if self._real_tag:
@@ -144,6 +156,10 @@ class Tag:
                 del path[alias]
             except KeyError:
                 pass
+        try:
+            del tse.CooldownBlock.COOLDOWNS[self.cooldown_key]
+        except KeyError:
+            pass
 
     @classmethod
     def from_dict(
@@ -210,6 +226,12 @@ class Tag:
         await self.update_config()
         return f"Edited `{self}`'s tagscript from **{hn(old_tagscript)}** to **{hn(len(self.tagscript))}** characters."
 
+    async def append_tagscript(self, tagscript: str) -> str:
+        old_tagscript = len(self.tagscript)
+        self.tagscript += f"\n{tagscript}"
+        await self.update_config()
+        return f"Edited `{self}`'s tagscript from **{hn(old_tagscript)}** to **{hn(len(self.tagscript))}** characters."
+
     async def get_info(self, ctx: commands.Context) -> discord.Embed:
         desc = [
             f"Author: {self.author.mention if self.author else self.author_id}",
@@ -233,12 +255,8 @@ class Tag:
         return await ctx.send(embed=await self.get_info(ctx))
 
     async def send_raw_tagscript(self, ctx: commands.Context):
-        tagscript = discord.utils.escape_markdown(self.tagscript)
-        for page in pagify(tagscript):
-            await ctx.send(
-                page,
-                allowed_mentions=discord.AllowedMentions.none(),
-            )
+        for page in pagify(self.tagscript):
+            await ctx.send(box(page), allowed_mentions=discord.AllowedMentions.none())
 
 
 class SilentContext(commands.Context):
